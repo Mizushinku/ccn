@@ -7,6 +7,9 @@
 #include <netinet/in.h>
 #include <errno.h>
 #include <netdb.h>
+#include <sys/stat.h>
+#include <libgen.h>
+#include <time.h>
 
 void tcp_send(char *, char *, char *);
 void tcp_recv(char *, char *);
@@ -19,6 +22,8 @@ void udp_recv(char *, char *);
                 perror(m); \
                 exit(EXIT_FAILURE); \
         } while(0)
+
+#define BUFFER_SIZE 10240
 
 
 int main(int argc, char *argv[])
@@ -50,70 +55,134 @@ int main(int argc, char *argv[])
 void tcp_send(char *ip, char *port, char *filepath)
 {
 	//printf("\nmethod = tcp_send\nip = %s\nport = %s\nfile path = %s\n\n", ip, port, filepath);
-	int sockfd, portno, n;
+	int sockfd, portno, n, filesize, bytes, scnt = 0;
+    float bar = 0.0;
     struct sockaddr_in serv_addr;
     struct hostent *server;
+    FILE *fp;
+    struct stat filest;
+    time_t timep;
+    struct tm *tmptr;
 
-    char buffer[256];
+    //10KB buffer
+    char buffer[BUFFER_SIZE];
     
+    //get port number from input
     portno = atoi(port);
+
+    //get socket file descriptor
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) 
         ERR_EXIT("ERROR opening socket");
+
+    //get the target ip address
     server = gethostbyname(ip);
     if (server == NULL) {
         fprintf(stderr,"ERROR, no such host\n");
         exit(0);
     }
+
+    //init the sockaddr_in
     bzero((char *) &serv_addr, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(portno);
 
+    //get the ip address form hostent
+    //h_addr_list can contain many ip address. use only the first element here
     bcopy((char *)server->h_addr_list[0], 
          (char *)&serv_addr.sin_addr.s_addr,
          server->h_length);
-    serv_addr.sin_port = htons(portno);
+    
+    //try to connect
     if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
         ERR_EXIT("ERROR connecting");
-    //printf("Please enter the message: ");
-    //bzero(buffer,256);
-    //fgets(buffer,255,stdin);
-	strcpy(buffer, filepath);
-    n = write(sockfd,buffer,strlen(buffer));
-    if (n < 0) 
-         ERR_EXIT("ERROR writing to socket");
-    bzero(buffer,256);
-    n = read(sockfd,buffer,255);
-    if (n < 0) 
-         ERR_EXIT("ERROR reading from socket");
-    printf("%s\n",buffer);
+
+    //open the file, read byte
+    fp = fopen(filepath, "rb");
+    if(fp == NULL) {
+        ERR_EXIT("open file error");
+    }
+
+    //check file size
+    stat(filepath, &filest);
+    filesize = filest.st_size;
+    
+    //send file name, let receiver knows file type
+    char *filename = basename(filepath);
+    write(sockfd, filename, strlen(filename));
+    //wait for reply
+    read(sockfd,buffer,2);
+
+    printf("processing...\n");
+    //transfer the file
+    while(!feof(fp)) {
+        //read file data to the buffer
+        bytes = fread(buffer, sizeof(char), sizeof(buffer), fp);
+        //write to the receiver
+        bytes = write(sockfd,buffer,bytes);
+        if (bytes < 0) 
+            ERR_EXIT("ERROR writing to socket");
+        
+        //waiting for reply
+        n = read(sockfd,buffer,2);
+        if (n < 0) 
+            ERR_EXIT("ERROR reading from socket");
+        if(strncmp(buffer, "OK", 2) != 0) {
+            ERR_EXIT("ERROR sending file");
+        }
+
+        //check transfer status
+        //update the status when get a reply
+        scnt += bytes;
+        float status = (float)scnt/filesize * 100.0;
+        while(status >= bar + 5.0) {
+            bar += 5.0;
+            time(&timep);
+            tmptr = localtime(&timep);
+            printf("%.0f%% ", bar);
+            printf("%d/%d/%d ", 1900+tmptr->tm_year, 1+tmptr->tm_mon, tmptr->tm_mday);
+            printf("%d:%d:%d\n", tmptr->tm_hour, tmptr->tm_min, tmptr->tm_sec);
+        }
+    }
+    printf("\nfinish\n\n");
+
     close(sockfd);
 }
 
 void tcp_recv(char *ip, char * port)
 {
 	//printf("\nmethod = tcp_recv\nip = %s\nport = %s\n\n", ip, port);
-	int sockfd, newsockfd, portno;
+	int sockfd, newsockfd, portno, bytes;
     socklen_t clilen;
-    char buffer[256];
+    char buffer[BUFFER_SIZE];
     struct sockaddr_in serv_addr, cli_addr;
     int n;
+    FILE *fp;
+
+    //get socket file descriptor
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0)
        ERR_EXIT("ERROR opening socket");
+
+    //init the sockaddr_in
     bzero((char *) &serv_addr, sizeof(serv_addr));
     portno = atoi(port);
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
     serv_addr.sin_port = htons(portno);
 
+    //let the socket process not wait the WAIT_TIME on the port
     int on = 1;
     if((setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on))) < 0) {
         ERR_EXIT("setsocketopt error\n");
     }
 
+    //bind the socket
     if (bind(sockfd, (struct sockaddr *) &serv_addr,
              sizeof(serv_addr)) < 0)
              ERR_EXIT("ERROR on binding");
+
+    //listen the socket, waiting for someone wants to connect
     listen(sockfd,5);
     clilen = sizeof(cli_addr);
     newsockfd = accept(sockfd,
@@ -121,12 +190,42 @@ void tcp_recv(char *ip, char * port)
                 &clilen);
     if (newsockfd < 0)
          ERR_EXIT("ERROR on accept");
-    bzero(buffer,256);
-    n = read(newsockfd,buffer,255);
-    if (n < 0) ERR_EXIT("ERROR reading from socket");
-    printf("Here is the message: %s\n",buffer);
-    n = write(newsockfd,"I got your message",18);
-    if (n < 0) ERR_EXIT("ERROR writing to socket");
+    
+    bzero(buffer,sizeof(buffer));
+
+    //get file name
+    char tmp[100] = {},  filename[100] = "out_";
+    read(newsockfd, tmp,sizeof(tmp));
+    //reply
+    write(newsockfd,"OK",2);
+    strcat(filename, tmp);
+    printf("\nfile name = %s\n\nprocessing...\n", filename);
+
+    //create file
+    fp = fopen(filename, "wb");
+    if(fp == NULL) {
+        ERR_EXIT("error open file");
+    }
+
+    //receive data fome sender
+    while(1) {
+        bytes = read(newsockfd,buffer,sizeof(buffer));
+        if (bytes < 0) ERR_EXIT("ERROR reading from socket");
+
+
+        //end of transfer
+        if(bytes == 0) {
+            printf("finish\n\n");
+            break;
+        }
+
+        bytes = fwrite(buffer, sizeof(char), bytes, fp);
+
+        //reply OK
+        n = write(newsockfd,"OK",2);
+        if (n < 0) ERR_EXIT("ERROR writing to socket");
+    }
+    
     close(newsockfd);
     close(sockfd);
 }
@@ -154,10 +253,34 @@ void udp_send(char *ip, char *port, char *filepath)
          server->h_length);
     servaddr.sin_port = htons(atoi(port));
 
-    int ret;
-    char sendbuf[1024] = {0};
-    char recvbuf[1024] = {0};
-    while (fgets(sendbuf, sizeof(sendbuf), stdin) != NULL)
+    int ret, filesize;
+    char sendbuf[BUFFER_SIZE] = {0};
+    char recvbuf[16] = {0};
+    
+    FILE *fp;
+    struct stat filest;
+    time_t timep;
+    struct tm *tmptr;
+
+    //open the file, read byte
+    fp = fopen(filepath, "rb");
+    if(fp == NULL) {
+        ERR_EXIT("open file error");
+    }
+
+    //check file size
+    stat(filepath, &filest);
+    filesize = filest.st_size;
+
+    //send file name, let receiver knows file type
+    char *filename = basename(filepath);
+    strcpy(sendbuf, filename);
+    sendto(sock, sendbuf, strlen(sendbuf), 0, (struct sockaddr *)&servaddr, sizeof(servaddr));
+    
+
+    printf("processing...\n");
+
+    while (!feof(fp))
     {
 
         sendto(sock, sendbuf, strlen(sendbuf), 0, (struct sockaddr *)&servaddr, sizeof(servaddr));
@@ -195,10 +318,27 @@ void udp_recv(char *ip, char * port)
     if (bind(sock, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
         ERR_EXIT("bind error");
 
-	char recvbuf[1024] = {0};
+	char recvbuf[BUFFER_SIZE] = {0};
     struct sockaddr_in peeraddr;
     socklen_t peerlen;
-    int n;
+    int n = 0;
+    char tmp[100] = {},  filename[100] = "out_";
+    FILE *fp;
+
+    do {
+        peerlen = sizeof(peeraddr);
+        memset(recvbuf, 0, sizeof(recvbuf));
+        n = recvfrom(sock, recvbuf, sizeof(recvbuf), 0,
+                    (struct sockaddr *)&peeraddr, &peerlen);
+        strcpy(tmp, recvbuf);
+        strcat(filename, tmp);
+        printf("\nfile name = %s\n\n", filename);
+    }while(n == 0);
+
+    fp = fopen(filename, "wb");
+    if(fp == NULL) {
+        ERR_EXIT("error open file");
+    }
 
     while (1)
     {
@@ -219,7 +359,7 @@ void udp_recv(char *ip, char * port)
         {
 
             fputs(recvbuf, stdout);
-            sendto(sock, recvbuf, n, 0,
+            sendto(sock, "OK", 2, 0,
                    (struct sockaddr *)&peeraddr, peerlen);
         }
     }
