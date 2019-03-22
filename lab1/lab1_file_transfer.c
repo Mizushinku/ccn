@@ -233,7 +233,9 @@ void tcp_recv(char *ip, char * port)
 void udp_send(char *ip, char *port, char *filepath)
 {
 	//printf("\nmethod = udp_send\nip = %s\nport = %s\nfile path = %s\n\n", ip, port, filepath);
-	int sock;
+	//do much the same thing as tcp_send
+    int sock, bytes, scnt = 0;
+    float bar = 0.0;
     if ((sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0)
         ERR_EXIT("socket");
 
@@ -282,9 +284,12 @@ void udp_send(char *ip, char *port, char *filepath)
 
     while (!feof(fp))
     {
+        bytes = fread(sendbuf, sizeof(char), sizeof(sendbuf), fp);
 
-        sendto(sock, sendbuf, strlen(sendbuf), 0, (struct sockaddr *)&servaddr, sizeof(servaddr));
+        //sned bytes
+        bytes = sendto(sock, sendbuf, bytes, 0, (struct sockaddr *)&servaddr, sizeof(servaddr));
 
+        //wait reply
         ret = recvfrom(sock, recvbuf, sizeof(recvbuf), 0, NULL, NULL);
         if (ret == -1)
         {
@@ -293,11 +298,24 @@ void udp_send(char *ip, char *port, char *filepath)
             ERR_EXIT("recvfrom");
         }
 
-		fputs("get the msg :", stdout);
-        fputs(recvbuf, stdout);
+        //update transfer status
+        scnt += bytes;
+        float status = (float)scnt/filesize * 100.0;
+        while(status >= bar + 5.0) {
+            bar += 5.0;
+            time(&timep);
+            tmptr = localtime(&timep);
+            printf("%.0f%% ", bar);
+            printf("%d/%d/%d ", 1900+tmptr->tm_year, 1+tmptr->tm_mon, tmptr->tm_mday);
+            printf("%d:%d:%d\n", tmptr->tm_hour, tmptr->tm_min, tmptr->tm_sec);
+        }
+
         memset(sendbuf, 0, sizeof(sendbuf));
         memset(recvbuf, 0, sizeof(recvbuf));
     }
+    //let receiver knows the end of send
+    sendto(sock, sendbuf, 0, 0, (struct sockaddr *)&servaddr, sizeof(servaddr));
+    printf("\nfinish\n\n");
 
     close(sock);
 }
@@ -305,6 +323,7 @@ void udp_send(char *ip, char *port, char *filepath)
 void udp_recv(char *ip, char * port)
 {
 	//printf("\nmethod = udp_recv\nip = %s\nport = %s\n\n", ip, port);
+    //do much the same thing as tcp_recv
 	int sock;
     if ((sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0)
         ERR_EXIT("socket error");
@@ -325,6 +344,7 @@ void udp_recv(char *ip, char * port)
     char tmp[100] = {},  filename[100] = "out_";
     FILE *fp;
 
+    //wait for sender sends you file name
     do {
         peerlen = sizeof(peeraddr);
         memset(recvbuf, 0, sizeof(recvbuf));
@@ -332,7 +352,7 @@ void udp_recv(char *ip, char * port)
                     (struct sockaddr *)&peeraddr, &peerlen);
         strcpy(tmp, recvbuf);
         strcat(filename, tmp);
-        printf("\nfile name = %s\n\n", filename);
+        printf("\nfile name = %s\n\nprocessing...\n", filename);
     }while(n == 0);
 
     fp = fopen(filename, "wb");
@@ -357,10 +377,12 @@ void udp_recv(char *ip, char * port)
         }
         else if(n > 0)
         {
-
-            fputs(recvbuf, stdout);
+            fwrite(recvbuf, sizeof(char), n, fp);
             sendto(sock, "OK", 2, 0,
                    (struct sockaddr *)&peeraddr, peerlen);
+        } else if(n == 0) {
+            printf("\nfinish\n\n");
+            break;
         }
     }
     close(sock);
