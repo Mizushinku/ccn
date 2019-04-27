@@ -18,7 +18,7 @@
                 exit(EXIT_FAILURE); \
         } while(0)
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 10240
 #define SERVER_PORT 10108
 
 int main(int argc, char *argv[])
@@ -51,10 +51,11 @@ int main(int argc, char *argv[])
 
     printf("waitting for server reply...\n");
 
-    char recvbuf[BUFFER_SIZE] = {0};
+    unsigned char recvbuf[BUFFER_SIZE] = {0};
     struct sockaddr_in peeraddr;
     socklen_t peerlen;
     while(1) {
+        peerlen = sizeof(peeraddr);
         sendto(sock, "connect", 7, 0, (struct sockaddr *)&servaddr, sizeof(servaddr));
         recvfrom(sock, recvbuf, sizeof(recvbuf), 0, (struct sockaddr *)&peeraddr, &peerlen);
         if(strcmp(recvbuf, "OK") == 0)
@@ -62,6 +63,8 @@ int main(int argc, char *argv[])
     }
 
     printf("server reply\n");
+
+
     
     
     int n = 0;
@@ -89,6 +92,11 @@ int main(int argc, char *argv[])
         ERR_EXIT("error open file");
     }
 
+    int packnum, packcnt = 0;
+    tv.tv_sec = 5;
+    tv.tv_usec = 0;
+    if(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+        ERR_EXIT("set socket timeout opt error");
     while (1)
     {
 
@@ -96,21 +104,39 @@ int main(int argc, char *argv[])
         memset(recvbuf, 0, sizeof(recvbuf));
         n = recvfrom(sock, recvbuf, sizeof(recvbuf), 0,
                      (struct sockaddr *)&peeraddr, &peerlen);
+
+        
         if (n == -1)
         {
-
             if (errno == EINTR)
                 continue;
+            if(errno == EWOULDBLOCK) {
+                //recvfrom time out
+                printf("recvfrom time out\n");
+                break;
+            }
 
             ERR_EXIT("recvfrom error");
         }
         else if(n > 0)
         {
-            fwrite(recvbuf, sizeof(char), n, fp);
+            /*
+            packnum = 0;
+            for(int i = 0; i < 4; ++i) {
+		        packnum += recvbuf[i] << (24 - i*8);
+	        }
+            printf("receive pack:%d from server\n", packnum);
+            */
+            
+            ++packcnt;
+            fwrite(recvbuf+4, sizeof(char), n-4, fp);
+            sendto(sock, "OK", 2, 0, (struct sockaddr *)&peeraddr, peerlen);
         } else if(n == 0) {
             printf("\nfinish\n\n");
             break;
         }
     }
+    printf("totol pack = %d\nfinish\n\n", packcnt);
+    
     close(sock);
 }
