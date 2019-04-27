@@ -128,5 +128,6 @@ void* handle_send(void *data) {
     //let receiver knows the end of send
     sendto(sock, sendbuf, 0, 0, (struct sockaddr *)&client_addr, sizeof(client_addr));
     printf("\nfinish request form %s : %d (%d pack)\n\n", inet_ntoa(client_addr.sin_addr), htons(client_addr.sin_port), packnum-1);
+    fclose(fp);
 }
 

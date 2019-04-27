@@ -125,8 +125,7 @@ int main(int argc, char *argv[])
             for(int i = 0; i < 4; ++i) {
 		        packnum += recvbuf[i] << (24 - i*8);
 	        }
-            printf("receive pack:%d from server\n", packnum);
-            
+            //printf("receive pack:%d from server\n", packnum);
             
             ++packcnt;
             fwrite(recvbuf+4, sizeof(char), n-4, fp);
@@ -141,6 +140,7 @@ int main(int argc, char *argv[])
         }
     }
     printf("finish\n\n");
+    fclose(fp);
     
     close(sock);
 }
