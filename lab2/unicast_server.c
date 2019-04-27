@@ -126,7 +126,6 @@ void* handle_send(void *data) {
         ++packnum;
     }
     //let receiver knows the end of send
-    //sendto(sock, "\r\nend\r\n", 7, 0, (struct sockaddr *)&client_addr, sizeof(client_addr));
     sendto(sock, sendbuf, 0, 0, (struct sockaddr *)&client_addr, sizeof(client_addr));
     printf("\nfinish request form %s : %d (%d pack)\n\n", inet_ntoa(client_addr.sin_addr), htons(client_addr.sin_port), packnum-1);
 }

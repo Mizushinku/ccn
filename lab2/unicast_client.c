@@ -120,23 +120,27 @@ int main(int argc, char *argv[])
         }
         else if(n > 0)
         {
-            /*
+            
             packnum = 0;
             for(int i = 0; i < 4; ++i) {
 		        packnum += recvbuf[i] << (24 - i*8);
 	        }
             printf("receive pack:%d from server\n", packnum);
-            */
+            
             
             ++packcnt;
             fwrite(recvbuf+4, sizeof(char), n-4, fp);
             sendto(sock, "OK", 2, 0, (struct sockaddr *)&peeraddr, peerlen);
         } else if(n == 0) {
-            printf("\nfinish\n\n");
+            float rate = 0;
+            if(packnum - packcnt != 0) {
+                rate = ((float)(packnum - packcnt))/packnum * 100;
+            }
+            printf("\ntotol pack = %d\npacket loss rate = %.2f%%\n\n", packnum, rate);
             break;
         }
     }
-    printf("totol pack = %d\nfinish\n\n", packcnt);
+    printf("finish\n\n");
     
     close(sock);
 }
