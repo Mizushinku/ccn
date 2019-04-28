@@ -10,14 +10,18 @@
 #include <string.h>
 #include <sys/time.h>
 #include <errno.h>
+#include <liquid/liquid.h>
+#include <math.h>
 
-#define BUFFER_SIZE 10240
+#define BUFFER_SIZE 8192
+#define ENCODE_BUF_SIZE 14336
  
 struct sockaddr_in localSock;
 struct ip_mreq group;
 int sd;
 int datalen;
-unsigned char databuf[BUFFER_SIZE];
+unsigned char databuf[ENCODE_BUF_SIZE];
+unsigned char decode_buf[BUFFER_SIZE];
  
 int main(int argc, char *argv[])
 {
@@ -88,11 +92,16 @@ int main(int argc, char *argv[])
 	}
 	
 	printf("Waiting for server sending a file...\n");
-	int bytes = 0;
+	int bytes = 0, packnum, packcnt = 0;
 	struct timeval tv;
     tv.tv_sec = 5;
     tv.tv_usec = 0;
 	int first_recv = 1;
+
+	//FEC, using Hamming(7,4)
+	fec_scheme fs = LIQUID_FEC_HAMMING74;
+	fec hm74 = fec_create(fs, NULL);
+
 	while(1) {
 		bytes = read(sd, databuf, sizeof(databuf));
 		
@@ -107,7 +116,27 @@ int main(int argc, char *argv[])
 			exit(1);
 		}
 		else if(bytes > 0) {
-			fwrite(databuf, sizeof(char), bytes, fp);
+			if(argc == 3) {
+				int decode_len = floor(bytes * 4.0 / 7.0);
+				fec_decode(hm74, decode_len, databuf, decode_buf);
+
+				packnum = 0;
+				for(int i = 0; i < 4; ++i) {
+					packnum += decode_buf[i] << (24 - i*8);
+				}
+
+				fwrite(decode_buf+4, sizeof(char), decode_len-4, fp);
+			} else {
+				packnum = 0;
+				for(int i = 0; i < 4; ++i) {
+					packnum += databuf[i] << (24 - i*8);
+				}
+
+				fwrite(databuf+4, sizeof(char), bytes-4, fp);
+			}
+			
+			++packcnt;
+
 			if(first_recv) {
 				if(setsockopt(sd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
 					perror("set socket timeout opt error");
@@ -119,7 +148,13 @@ int main(int argc, char *argv[])
 		} else {
 			break;
 		}
+		memset(decode_buf, 0, sizeof(decode_buf));
 	}
+	float rate = 0;
+	if(packnum - packcnt != 0) {
+		rate = ((float)(packnum - packcnt))/packnum * 100;
+	}
+	printf("\ntotal pack = %d, receive pack = %d\npacket loss rate = %.2f%%\n\n", packnum, packcnt, rate);
 	printf("\nReceiving a file...finish\n\n");
 
 	fclose(fp);

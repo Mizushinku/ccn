@@ -7,13 +7,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <liquid/liquid.h>
+#include <math.h>
 
-#define BUFFER_SIZE 10240
+#define BUFFER_SIZE 8192
+#define ENCODE_BUF_SIZE 14336
 
 struct in_addr localInterface;
 struct sockaddr_in groupSock;
 int sd;
-unsigned char databuf[BUFFER_SIZE] = "Multicast test message.";
+unsigned char databuf[BUFFER_SIZE] = {};
+unsigned char encode_buf[ENCODE_BUF_SIZE] = {};
 int datalen = sizeof(databuf);
 char *filepath;
  
@@ -71,16 +75,39 @@ int main (int argc, char *argv[ ])
 	}
 
 	printf("Sending a file to group...processing\n");
-	int bytes = 0;
-	while(!feof(fp)) {
-		bytes = fread(databuf, sizeof(unsigned char), sizeof(databuf), fp);
+	int bytes = 0, packnum = 0;
 
-		if(sendto(sd, databuf, bytes, 0, (struct sockaddr*)&groupSock, sizeof(groupSock)) < 0) {
-			perror("Sending datagram message error");
+	//FEC, using Hamming(7,4)
+	fec hm74;
+	if(argc == 3) {
+		fec_scheme fs = LIQUID_FEC_HAMMING74;
+		hm74 = fec_create(fs, NULL);
+		fec_print(hm74);
+	}
+
+	while(!feof(fp)) {
+		++packnum;
+		for(int i = 0; i < 4; ++i) {
+			databuf[i] = (packnum >> (24 - i*8));
 		}
+		bytes = fread(databuf+4, sizeof(unsigned char), sizeof(databuf)-4, fp);
+
+		if(argc == 3) {
+			fec_encode(hm74, bytes+4, databuf, encode_buf);
+			int encode_len = ceil((bytes + 4) * 7.0 / 4.0);
+
+			if(sendto(sd, encode_buf, encode_len, 0, (struct sockaddr*)&groupSock, sizeof(groupSock)) < 0) {
+				perror("Sending datagram message error");
+			}
+		} else {
+			if(sendto(sd, databuf, bytes+4, 0, (struct sockaddr*)&groupSock, sizeof(groupSock)) < 0) {
+				perror("Sending datagram message error");
+			}
+		}
+		memset(databuf, 0, sizeof(databuf));
 	}
 	sendto(sd, "", 0, 0, (struct sockaddr*)&groupSock, sizeof(groupSock));
-	printf("\nSending a file...finish\n\n");
+	printf("\nSending a file (%d packets)...finish\n\n", packnum);
 	//sendto(sd, "OK", 2, 0, (struct sockaddr*)&groupSock, sizeof(groupSock));
 	
 	 
