@@ -34,7 +34,7 @@ int main (int argc, char *argv[ ])
 	  printf("Opening the datagram socket...OK.\n");
 	 
 	/* Initialize the group sockaddr structure with a */
-	/* group address of 225.1.1.1 and port 5555. */
+	/* group address of 226.1.1.1 and port 4321. */
 	memset((char *) &groupSock, 0, sizeof(groupSock));
 	groupSock.sin_family = AF_INET;
 	groupSock.sin_addr.s_addr = inet_addr("226.1.1.1");
@@ -66,6 +66,7 @@ int main (int argc, char *argv[ ])
 	/* groupSock sockaddr structure. */
 	/*int datalen = BUFFER_SIZE;*/
 
+	//open file
 	FILE *fp;
 	filepath = argv[1];
 	fp = fopen(filepath, "rb");
@@ -85,15 +86,20 @@ int main (int argc, char *argv[ ])
 		fec_print(hm74);
 	}
 
+	//sending the file byte
 	while(!feof(fp)) {
+		//add packet number in head of packet
 		++packnum;
 		for(int i = 0; i < 4; ++i) {
 			databuf[i] = (packnum >> (24 - i*8));
 		}
 		bytes = fread(databuf+4, sizeof(unsigned char), sizeof(databuf)-4, fp);
 
+		//if argc == 3, use FEC
 		if(argc == 3) {
+			//get the encoded bytes
 			fec_encode(hm74, bytes+4, databuf, encode_buf);
+			//get real length of the encoded bytes 
 			int encode_len = ceil((bytes + 4) * 7.0 / 4.0);
 
 			if(sendto(sd, encode_buf, encode_len, 0, (struct sockaddr*)&groupSock, sizeof(groupSock)) < 0) {
@@ -106,6 +112,7 @@ int main (int argc, char *argv[ ])
 		}
 		memset(databuf, 0, sizeof(databuf));
 	}
+	// send FIN packet let client know the end of sending
 	sendto(sd, "", 0, 0, (struct sockaddr*)&groupSock, sizeof(groupSock));
 	printf("\nSending a file (%d packets)...finish\n\n", packnum);
 	//sendto(sd, "OK", 2, 0, (struct sockaddr*)&groupSock, sizeof(groupSock));

@@ -79,7 +79,7 @@ int main(int argc, char *argv[])
 	else
 		printf("Adding multicast group...OK.\n");
 	 
-	/* Read from the socket. */
+	//open file, filename = out_argv[1]
 	FILE *fp;
 	char filepath[100] = {"out_"};
 	if(argc > 1) {
@@ -103,6 +103,7 @@ int main(int argc, char *argv[])
 	fec hm74 = fec_create(fs, NULL);
 
 	while(1) {
+		//read bytes
 		bytes = read(sd, databuf, sizeof(databuf));
 		
 		if(bytes < 0) {
@@ -116,10 +117,13 @@ int main(int argc, char *argv[])
 			exit(1);
 		}
 		else if(bytes > 0) {
+			//if argc == 3, use FEC
 			if(argc == 3) {
+				//get real data length
 				int decode_len = floor(bytes * 4.0 / 7.0);
 				fec_decode(hm74, decode_len, databuf, decode_buf);
 
+				//get packet number
 				packnum = 0;
 				for(int i = 0; i < 4; ++i) {
 					packnum += decode_buf[i] << (24 - i*8);
@@ -137,6 +141,7 @@ int main(int argc, char *argv[])
 			
 			++packcnt;
 
+			//after the first recv, if recv timeout than break read loop
 			if(first_recv) {
 				if(setsockopt(sd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
 					perror("set socket timeout opt error");
@@ -146,10 +151,12 @@ int main(int argc, char *argv[])
 				first_recv = 0;
 			}
 		} else {
+			//FIN packet, end of sending
 			break;
 		}
 		memset(decode_buf, 0, sizeof(decode_buf));
 	}
+	//get packet loss rate
 	float rate = 0;
 	if(packnum - packcnt != 0) {
 		rate = ((float)(packnum - packcnt))/packnum * 100;

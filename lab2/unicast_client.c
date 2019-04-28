@@ -22,16 +22,11 @@
 #define SERVER_PORT 10108
 
 int main(int argc, char *argv[])
-{
+{   
+    //initialize socket
     int sock, bytes, scnt = 0;
     if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
         ERR_EXIT("socket");
-
-    struct timeval tv;
-    tv.tv_sec = 1;
-    tv.tv_usec = 0;
-    if(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
-        ERR_EXIT("set socket timeout opt error");
 
     struct sockaddr_in servaddr;
 	struct hostent *server;
@@ -49,8 +44,16 @@ int main(int argc, char *argv[])
          server->h_length);
     servaddr.sin_port = htons(SERVER_PORT);
 
+    //set recv timeout
+    struct timeval tv;
+    tv.tv_sec = 1;
+    tv.tv_usec = 0;
+    if(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+        ERR_EXIT("set socket timeout opt error");
+
     printf("waitting for server reply...\n");
 
+    //each time interval send connect request to server, waiting for reply
     unsigned char recvbuf[BUFFER_SIZE] = {0};
     struct sockaddr_in peeraddr;
     socklen_t peerlen;
@@ -86,12 +89,13 @@ int main(int argc, char *argv[])
     }while(n == 0);
     printf("\nfile name = %s\n\nprocessing...\n", filename);
     
-
+    //open file
     fp = fopen(filename, "wb");
     if(fp == NULL) {
         ERR_EXIT("error open file");
     }
 
+    //reset recv timeout
     int packnum, packcnt = 0;
     tv.tv_sec = 5;
     tv.tv_usec = 0;
@@ -100,6 +104,7 @@ int main(int argc, char *argv[])
     while (1)
     {
 
+        //receeive n bytes
         peerlen = sizeof(peeraddr);
         memset(recvbuf, 0, sizeof(recvbuf));
         n = recvfrom(sock, recvbuf, sizeof(recvbuf), 0,
@@ -120,7 +125,7 @@ int main(int argc, char *argv[])
         }
         else if(n > 0)
         {
-            
+            //get packet number
             packnum = 0;
             for(int i = 0; i < 4; ++i) {
 		        packnum += recvbuf[i] << (24 - i*8);
@@ -129,8 +134,10 @@ int main(int argc, char *argv[])
             
             ++packcnt;
             fwrite(recvbuf+4, sizeof(char), n-4, fp);
+            //reply
             sendto(sock, "OK", 2, 0, (struct sockaddr *)&peeraddr, peerlen);
         } else if(n == 0) {
+            //show the packet loss rate
             float rate = 0;
             if(packnum - packcnt != 0) {
                 rate = ((float)(packnum - packcnt))/packnum * 100;

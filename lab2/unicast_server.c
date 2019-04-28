@@ -30,6 +30,7 @@ char *filepath;
 
 int main(int argc, char *argv[])
 {
+    // initialize socket fd and server address struct
     int sock;
     if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
         ERR_EXIT("socket error");
@@ -40,9 +41,12 @@ int main(int argc, char *argv[])
     servaddr.sin_port = htons(SERVER_PORT);
     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 
+    // bind the socket
     if (bind(sock, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
         ERR_EXIT("bind error");
 
+    // while loop waiting for cilent request to connect
+    // if someone connects to server, create a new thread to handle the request
     filepath = argv[1];
     unsigned char buffer[10] = {};
     while(1) {
@@ -60,6 +64,7 @@ int main(int argc, char *argv[])
 
 void* handle_send(void *data) {
 
+    // get the client's address struct
     struct sockaddr_in client_addr = *((struct sockaddr_in *)data);
     struct sockaddr_in peer_addr;
 
@@ -68,8 +73,6 @@ void* handle_send(void *data) {
         ERR_EXIT("socket error");
 
     int bytes;
-
-    int ret, filesize;
     unsigned char sendbuf[BUFFER_SIZE] = {0};
     unsigned char recvbuf[16] = {0};
     
@@ -84,17 +87,17 @@ void* handle_send(void *data) {
 
     //check file size
     stat(filepath, &filest);
-    filesize = filest.st_size;
 
     //send file name, let receiver knows file type
     char *filename = basename(filepath);
     strcpy(sendbuf, filename);
-    
     sendto(sock, sendbuf, strlen(sendbuf), 0, (struct sockaddr *)&client_addr, sizeof(client_addr));
     
 
     printf("client form %s : %d is processing...\n", inet_ntoa(client_addr.sin_addr), htons(client_addr.sin_port));
     int packnum = 1;
+
+    // set recv timeout
     struct timeval tv;
     tv.tv_sec = 0;
     tv.tv_usec = 100000;
@@ -103,7 +106,8 @@ void* handle_send(void *data) {
     socklen_t peerlen ;
 
     while (!feof(fp))
-    {
+    {   
+        //add packet number in head of packet
         for(int i = 0; i < 4; ++i) {
 		    sendbuf[i] = (packnum >> (24 - i*8));
 	    }
@@ -115,10 +119,13 @@ void* handle_send(void *data) {
             peerlen = sizeof(peer_addr);
             int n = recvfrom(sock, recvbuf, sizeof(recvbuf), 0, (struct sockaddr *)&peer_addr, &peerlen);
             if(n < 0) {
+                //recv timeout, don't wait for client reply
                 break;
             }
-            if(peer_addr.sin_port == client_addr.sin_port)
+            if(peer_addr.sin_port == client_addr.sin_port) {
+                //client reply
                 break;
+            }
         }
 
         memset(sendbuf, 0, sizeof(sendbuf));
